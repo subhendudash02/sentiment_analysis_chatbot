@@ -1,0 +1,6 @@
+# Add your project dependencies here
+requests
+fastapi
+pydantic
+transformers
+torch
