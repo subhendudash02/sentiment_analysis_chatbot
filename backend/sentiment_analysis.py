@@ -8,15 +8,37 @@ from transformers import pipeline
 nltk.download('punkt')
 emotion_classifier = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=None)
 
-def run_gemini_api(text):
-    detect_and_store_emotion(text)  
+def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKjsZBnrNvxP@cluster0.xgd2g.mongodb.net/", db_name="emotion_db", history_collection="conversations"):
+    detect_and_store_emotion(text)
+    # Retrieve last 3 conversation turns for context
+    client = MongoClient(mongo_uri)
+    db = client[db_name]
+    collection = db[history_collection]
+    history = []
+    if session_id:
+        history_cursor = collection.find({"session_id": session_id}).sort("timestamp", -1).limit(3)
+        history = list(history_cursor)[::-1]  # oldest first
+    # Build conversation context
+    conversation = ""
+    for turn in history:
+        conversation += f"Customer: {turn.get('user', '')}\nAgent: {turn.get('agent', '')}\n"
+    # Enhanced prompt engineering for Gemini with clarification instruction
+    system_prompt = (
+        "You are an experienced customer service agent for a large E-commerce company that sells a wide variety of items. "
+        "Always provide helpful, concise, and friendly answers to customer questions. "
+        "Keep your response under 50 words. "
+        "If the question is about products, orders, returns, shipping, or general help, answer as a professional support agent. "
+        "If you don't know the answer, politely suggest contacting human support. "
+        "If the customer's question is unclear or missing details, ask a clarifying question before answering."
+    )
+    prompt = f"{system_prompt}\n{conversation}Customer: {text}\nAgent:"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyD41Dv4rg7RaWJO3Nq_XpW9o_NoxaZ21oQ"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [
             {
                 "parts": [
-                    {"text": text}
+                    {"text": prompt}
                 ]
             }
         ]
@@ -25,11 +47,19 @@ def run_gemini_api(text):
     assert response.status_code == 200, f"API call failed: {response.status_code} {response.text}"
     try:
         candidates = response.json().get("candidates", [])
-        text = candidates[0]["content"]["parts"][0]["text"] if candidates else "No response text found."
+        agent_reply = candidates[0]["content"]["parts"][0]["text"] if candidates else "No response text found."
     except (KeyError, IndexError, TypeError):
-        text = "No response text found."
-    print("Response:", text)
-    return text
+        agent_reply = "No response text found."
+    print("Response:", agent_reply)
+    # Store this turn in conversation history
+    if session_id:
+        collection.insert_one({
+            "session_id": session_id,
+            "user": text,
+            "agent": agent_reply,
+            "timestamp": int(__import__('time').time())
+        })
+    return agent_reply
 
 def detect_and_store_emotion(text, mongo_uri="mongodb+srv://admin:zYvjDKjsZBnrNvxP@cluster0.xgd2g.mongodb.net/", db_name="emotion_db", collection_name="emotions"):
     results = emotion_classifier(text)
