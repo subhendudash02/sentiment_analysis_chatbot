@@ -7,7 +7,18 @@ function Chatbot({ apiUrl = 'http://127.0.0.1:8000/sentiment-analysis' }) {
   ]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [sessionId, setSessionId] = useState('');
   const chatEndRef = useRef(null);
+
+  // Initialize or retrieve session ID when component mounts
+  useEffect(() => {
+    let existingSessionId = localStorage.getItem('chatSessionId');
+    if (!existingSessionId) {
+      existingSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('chatSessionId', existingSessionId);
+    }
+    setSessionId(existingSessionId);
+  }, []);
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -18,7 +29,7 @@ function Chatbot({ apiUrl = 'http://127.0.0.1:8000/sentiment-analysis' }) {
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
-    const userMessage = { sender: 'user', text: input };
+    const userMessage = { sender: 'user', text: input, sessionId };
     setMessages((msgs) => [...msgs, userMessage]);
     setInput('');
     setLoading(true);
@@ -26,13 +37,16 @@ function Chatbot({ apiUrl = 'http://127.0.0.1:8000/sentiment-analysis' }) {
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage.text })
+        body: JSON.stringify({
+          message: userMessage.text,
+          session_id: sessionId
+        })
       });
       if (response.ok) {
         const data = await response.json();
         setMessages((msgs) => [
           ...msgs,
-          { sender: 'bot', text: data.response || 'No response from AI.' }
+          { sender: 'bot', text: data.response || 'No response from AI.', sessionId }
         ]);
       } else {
         setMessages((msgs) => [
