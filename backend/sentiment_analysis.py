@@ -1,22 +1,28 @@
 import requests
+import os
 import json
 from pymongo import MongoClient
 import nltk
 from transformers import pipeline
 import uuid
+from dotenv import load_dotenv
+
+load_dotenv()
 
 nltk.download('punkt')
 emotion_classifier = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=None)
 
-def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKjsZBnrNvxP@cluster0.xgd2g.mongodb.net/", db_name="emotion_db", history_collection="conversations"):
-    detect_and_store_emotion(text)
+def run_gemini_api(text, session_id, mongo_uri=None, db_name="emotion_db", history_collection="conversations"):
+    if mongo_uri is None:
+        mongo_uri = os.getenv('MONGODB_URI')
+    detect_and_store_emotion(text, mongo_uri=mongo_uri)
     # Retrieve conversation history with enhanced context
     client = MongoClient(mongo_uri)
     db = client[db_name]
     collection = db[history_collection]
     history = []
     if session_id:
-        # Get last 5 turns with more metadata
+        # Get last 50 turns with more metadata
         history_cursor = collection.find(
             {"session_id": session_id},
             {"user": 1, "agent": 1, "timestamp": 1, "emotion": 1}
@@ -60,7 +66,7 @@ def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKj
         Customer's current query: {text}
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyD41Dv4rg7RaWJO3Nq_XpW9o_NoxaZ21oQ"
+    url = os.getenv('GEMINI_API')
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [
@@ -95,7 +101,7 @@ def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKj
         })
     return agent_reply
 
-def detect_and_store_emotion(text, mongo_uri="mongodb+srv://admin:zYvjDKjsZBnrNvxP@cluster0.xgd2g.mongodb.net/", db_name="emotion_db", collection_name="emotions"):
+def detect_and_store_emotion(text, mongo_uri, db_name="emotion_db", collection_name="emotions"):
     results = emotion_classifier(text)
     if results and isinstance(results, list):
         sorted_results = sorted(results[0], key=lambda x: x['score'], reverse=True)
@@ -113,8 +119,3 @@ def detect_and_store_emotion(text, mongo_uri="mongodb+srv://admin:zYvjDKjsZBnrNv
     result = collection.insert_one(doc)
     print(f"Stored in MongoDB with id: {result.inserted_id}")
     return dominant_emotion
-
-if __name__ == "__main__":
-    session_id = str(uuid.uuid4())
-    response_text = run_gemini_api("How are you today?", session_id=session_id)
-    detect_and_store_emotion(response_text)
