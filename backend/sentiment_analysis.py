@@ -1,4 +1,3 @@
-import os
 import requests
 import json
 from pymongo import MongoClient
@@ -20,19 +19,17 @@ def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKj
         # Get last 5 turns with more metadata
         history_cursor = collection.find(
             {"session_id": session_id},
-            {"user": 1, "agent": 1, "timestamp": 1, "emotion": 1, "context": 1}
-        ).sort("timestamp", -1).limit(20)
+            {"user": 1, "agent": 1, "timestamp": 1, "emotion": 1}
+        ).sort("timestamp", -1).limit(50)
         history = list(history_cursor)[::-1]  # oldest first
     # Build enhanced conversation context with emotions and metadata
     conversation = ""
     for turn in history:
         emotion = turn.get('emotion', '')
-        context = turn.get('context', {})
         conversation += (
             f"Customer: {turn.get('user', '')}\n"
             f"[Customer Emotion: {emotion}]\n"
             f"Agent: {turn.get('agent', '')}\n"
-            f"[Context: {json.dumps(context)}]\n\n"
         )
     # Enhanced prompt engineering for Gemini with clarification instruction
     system_prompt = (
@@ -62,6 +59,7 @@ def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKj
 
         Customer's current query: {text}
     """
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyD41Dv4rg7RaWJO3Nq_XpW9o_NoxaZ21oQ"
     headers = {'Content-Type': 'application/json'}
     data = {
@@ -81,13 +79,19 @@ def run_gemini_api(text, session_id=None, mongo_uri="mongodb+srv://admin:zYvjDKj
     except (KeyError, IndexError, TypeError):
         agent_reply = "No response text found."
     print("Response:", agent_reply)
-    # Store this turn in conversation history
+    # Store this turn in conversation history with enhanced metadata
     if session_id:
+        # Get emotion analysis
+        emotion_results = emotion_classifier(text)
+        current_emotion = emotion_results[0][0]['label'] if emotion_results and emotion_results[0] else 'neutral'
+        
+        # Store the conversation turn with metadata
         collection.insert_one({
             "session_id": session_id,
             "user": text,
             "agent": agent_reply,
-            "timestamp": int(__import__('time').time())
+            "timestamp": int(__import__('time').time()),
+            "emotion": current_emotion
         })
     return agent_reply
 
